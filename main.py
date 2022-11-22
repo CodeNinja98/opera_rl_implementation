@@ -1,37 +1,24 @@
-import logging
-import coloredlogs
-
-import gym
-
-
-coloredlogs.install(logging.DEBUG)
+import gymnasium as gym
+from Agent import Agent
+EP_LEN = 100
+NUM_EPS = 5
 
 def main():
-    # NOTE: It is important that you use "aicrowd_gym" instead of regular "gym"!
-    #       Otherwise, your submission will fail.
-    env = gym.make("LunarLander-v2", render_mode="human")
-
-
-    for i in range(10):
-        obs = env.reset()
+    env = gym.make("LunarLander-v2", render_mode="human",enable_wind=True)
+    agent = Agent(EP_LEN)
+    for i in range(NUM_EPS):
+        obs = env.reset()[0]
+        reward = 0
         done = False
-        for step_counter in range(100):
-
-            # Step your model here.
-            # Currently, it's doing random actions
-            random_act = env.action_space.sample()
-
-            next_state, reward, terminated, truncated, info = env.step(random_act)
-
+        agent.beginEpisode()
+        for step_counter in range(EP_LEN):
+            act = agent.step(obs,reward)
+            obs, reward, done, truncated, info = env.step(act)
             if done:
                 break
+        agent.endEpisode()
         print(f"[{i}] Episode complete")
-
-    # Close environment and clean up any bigger memory hogs.
-    # Otherwise, you might start running into memory issues
-    # on the evaluation server.
     env.close()
-
 
 if __name__ == "__main__":
     main()
