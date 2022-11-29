@@ -6,7 +6,6 @@ import torch as th
 from scipy.special import softmax
 from MCNode import MCNode
 from numpy.random import default_rng
-rng = default_rng()
 
 
 ACT_SPACE = 4
@@ -66,33 +65,42 @@ class Agent():
 
     def predict_state(self,S,A,dynamics):
         #PLACEHOLDER
-        return rng.random(OBS_SPACE)
+        return th.rand(OBS_SPACE)
     
     def differentiableMCQ(self,initial_state,dynamics,reward,N=500,max_depth=100,warmup=150):
-        initial_node = MCNode(initial_state)
+        initial_node = MCNode(initial_state, reward)
         for n in range(N):
             curr_node = initial_node
             curr_rollout = deque()
             curr_rollout.append((initial_node,-1))
 
             while True:
-                if n<warmup: action = random.randint(0,ACT_SPACE-1)
+                if n<warmup: action = th.randint(ACT_SPACE,(1,))
                 else: 
-                    action_probs = softmax(curr_node.rewards)
-                    action = rng.choice(ACT_SPACE,p=action_probs)
+                    action_probs = th.nn.Softmax(curr_node.rewards)
+                    action = th.multinomial(action_probs,1)
                 
                 #Transition to next state
                 if curr_node.branches[action] is not None:
                     curr_node = curr_node.branches[action]
                 else:
                     predicted_state = self.predict_state(curr_node.S,action,dynamics)
-                    curr_node = MCNode(predicted_state)
+                    curr_node = MCNode(predicted_state,reward)
                 
                 curr_rollout.append((curr_node,action))
                 if len(curr_rollout) >= max_depth or self.is_terminal(curr_node.S):
                     break
 
             #Backprop to update state-action values
+            #Fill in values for last node
+            final_act = curr_rollout.pop()[1]
+            curr_rollout[-1][0].rewards[final_act] = curr_rollout[-1][0].sa_rewards[final_act]
+
+            while len(curr_rollout) > 1:
+                node, act = curr_rollout.pop()
+                curr_rollout[-1][0].rewards[act] = curr_rollout[-1][0].sa_rewards[act] + node.V()
+        return initial_node.rewards
+
 
 
             
