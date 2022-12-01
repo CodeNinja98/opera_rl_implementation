@@ -6,12 +6,13 @@ import torch as th
 from MCNode import MCNode
 from numpy.random import default_rng
 from RewardNet import RewardNet
+rng = default_rng()
 
 
 ACT_SPACE = 4
 OBS_SPACE = 8
 BATCH_SIZE = 128
-TERM_BOUND = -5
+TERM_BOUND = -8
 class Agent():
     def __init__(self,H):
         self.episodeMemory = deque()
@@ -31,6 +32,9 @@ class Agent():
                 R = lambda s,a : self.rnet(s)[a]
                 qvals = self.differentiableMCQ(th.Tensor(obs),self.dnet,R)
                 act = np.argmax(qvals).item()
+                #action_probs = th.nn.functional.softmax(th.nan_to_num(qvals),dim=0).numpy()
+                #print(action_probs)
+                #act = rng.choice(4,p=action_probs)
         
         if self.last_state is None:
             self.last_state = obs
@@ -43,12 +47,12 @@ class Agent():
         return act
 
     def endEpisode(self,obs,reward):
-        transition = (self.last_state,self.last_act,np.array([-5]*OBS_SPACE),reward)
+        transition = (self.last_state,self.last_act,np.array([TERM_BOUND]*OBS_SPACE),reward)
         self.episodeMemory[-1].append(transition)
         if len(self.episodeMemory) < 3: return
 
         last_ep = list(self.episodeMemory[-1]) + list(self.episodeMemory[-2]) + list(self.episodeMemory[-3])
-        X = np.zeros((len(last_ep),OBS_SPACE+ACT_SPACE))
+        X = np.zeros((len(last_ep),OBS_SPACE*ACT_SPACE))
         y = np.zeros((len(last_ep),OBS_SPACE))
 
         X_reward = np.zeros((len(last_ep),OBS_SPACE))
@@ -57,9 +61,7 @@ class Agent():
         actions = np.zeros(len(last_ep))
 
         for i in range(len(last_ep)):
-            act_onehot = np.zeros(ACT_SPACE)
-            act_onehot[last_ep[i][1]] = 1
-            X[i] = np.concatenate((last_ep[i][0],act_onehot))
+            X[i] = np.concatenate([last_ep[i][0] if k == last_ep[i][1] else np.zeros(OBS_SPACE) for k in range(ACT_SPACE)])
             y[i] = last_ep[i][2]
             X_reward[i] = last_ep[i][0]
             actions[i] = last_ep[i][1]
@@ -72,7 +74,7 @@ class Agent():
     def beginEpisode(self):
         self.episodeMemory.append(deque())
 
-    def trainRewardNet(self, X, y, actions, epochs = 5000):
+    def trainRewardNet(self, X, y, actions, epochs = 2000):
 
         opt = th.optim.Adam(self.rnet.parameters(),lr=0.001)
         criterion = th.nn.MSELoss()
@@ -86,14 +88,14 @@ class Agent():
             #print('Reward Loss:',loss.item())
             loss.backward()
             opt.step()
-        print(y)
-        print(self.rnet(X).gather(1,actions))
+        #print(y)
+        #print(self.rnet(X).gather(1,actions))
         print("Final Reward Error:",th.abs((y - self.rnet(X).gather(1,actions))).mean(axis=0) )
 
-    def trainDynamicsNet(self,X,y,epochs = 1000):
+    def trainDynamicsNet(self,X,y,epochs = 4000):
 
-        opt = th.optim.Adam(self.dnet.parameters(),lr=0.01)
-        criterion = th.nn.MSELoss()
+        opt = th.optim.Adam(self.dnet.parameters(),lr=0.001)
+        criterion = th.nn.HuberLoss()
 
         self.dnet.train()
 
@@ -109,11 +111,11 @@ class Agent():
         return any(S<TERM_BOUND)
 
     def predict_state(self,S,A,dynamics):
-        act_onehot = th.zeros(ACT_SPACE)
-        act_onehot[A] = 1
-        return dynamics(th.cat((S,act_onehot)) )
+        #act_onehot = th.zeros(ACT_SPACE)
+        #act_onehot[A] = 1
+        return dynamics(th.cat([S if k == A else th.zeros(OBS_SPACE) for k in range(ACT_SPACE)]) )
     
-    def differentiableMCQ(self,initial_state,dynamics,reward,N=75,max_depth=50,warmup=50):
+    def differentiableMCQ(self,initial_state,dynamics,reward,N=35,max_depth=25,warmup=10):
         initial_node = MCNode(initial_state, reward)
         for n in range(N):
             curr_node = initial_node

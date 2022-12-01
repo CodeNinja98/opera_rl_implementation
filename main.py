@@ -1,10 +1,10 @@
 import gymnasium as gym
 from Agent import Agent
-EP_LEN = 100
+EP_LEN = 300
 NUM_EPS = 22
 
 def main():
-    env = gym.make("LunarLander-v2", render_mode="human",enable_wind=True)
+    env = gym.make("LunarLander-v2", render_mode="human",enable_wind=False)
     agent = Agent(EP_LEN)
     for i in range(NUM_EPS):
         obs = env.reset()[0]
@@ -19,7 +19,7 @@ def main():
             if done:
                 break
         agent.endEpisode(obs,reward)
-        print(f"[{i}] Episode complete","Reward:",total_reward)
+        print(f"[{i}] Episode complete","Reward:",total_reward,"Steps:",step_counter)
     env.close()
 
 if __name__ == "__main__":
