@@ -12,7 +12,6 @@ rng = default_rng()
 ACT_SPACE = 4
 OBS_SPACE = 8
 BATCH_SIZE = 128
-TERM_BOUND = -8
 class Agent():
     def __init__(self,H):
         self.episodeMemory = deque()
@@ -29,7 +28,7 @@ class Agent():
             with th.no_grad(): 
                 self.dnet.eval()
                 self.rnet.eval()
-                R = lambda s,a : self.rnet(s)[a]
+                R = lambda s,a : self.rnet(s[:8])[a]
                 qvals = self.differentiableMCQ(th.Tensor(obs),self.dnet,R)
                 act = np.argmax(qvals).item()
                 #action_probs = th.nn.functional.softmax(th.nan_to_num(qvals),dim=0).numpy()
@@ -40,20 +39,20 @@ class Agent():
             self.last_state = obs
             self.last_act = act
         else:
-            transition = (self.last_state,self.last_act,obs,reward)
+            transition = (self.last_state,self.last_act,obs,reward,False)
             self.episodeMemory[-1].append(transition)
             self.last_state = obs
             self.last_act = act
         return act
 
     def endEpisode(self,obs,reward):
-        transition = (self.last_state,self.last_act,np.array([TERM_BOUND]*OBS_SPACE),reward)
+        transition = (self.last_state,self.last_act,obs,reward,True)
         self.episodeMemory[-1].append(transition)
         if len(self.episodeMemory) < 3: return
 
         last_ep = list(self.episodeMemory[-1]) + list(self.episodeMemory[-2]) + list(self.episodeMemory[-3])
         X = np.zeros((len(last_ep),OBS_SPACE*ACT_SPACE))
-        y = np.zeros((len(last_ep),OBS_SPACE))
+        y = np.zeros((len(last_ep),OBS_SPACE+1))
 
         X_reward = np.zeros((len(last_ep),OBS_SPACE))
         y_reward = np.zeros(len(last_ep))
@@ -62,7 +61,7 @@ class Agent():
 
         for i in range(len(last_ep)):
             X[i] = np.concatenate([last_ep[i][0] if k == last_ep[i][1] else np.zeros(OBS_SPACE) for k in range(ACT_SPACE)])
-            y[i] = last_ep[i][2]
+            y[i] = np.concatenate((last_ep[i][2],np.array(([1])) if last_ep[i][4] else np.array(([0])) ) )
             X_reward[i] = last_ep[i][0]
             actions[i] = last_ep[i][1]
 
@@ -95,7 +94,7 @@ class Agent():
     def trainDynamicsNet(self,X,y,epochs = 4000):
 
         opt = th.optim.Adam(self.dnet.parameters(),lr=0.001)
-        criterion = th.nn.HuberLoss()
+        criterion = th.nn.MSELoss()
 
         self.dnet.train()
 
@@ -108,12 +107,12 @@ class Agent():
             opt.step()
 
     def is_terminal(self,S):
-        return any(S<TERM_BOUND)
+        return S[-1] > 0.5
 
     def predict_state(self,S,A,dynamics):
         #act_onehot = th.zeros(ACT_SPACE)
         #act_onehot[A] = 1
-        return dynamics(th.cat([S if k == A else th.zeros(OBS_SPACE) for k in range(ACT_SPACE)]) )
+        return dynamics(th.cat([S[:OBS_SPACE] if k == A else th.zeros(OBS_SPACE) for k in range(ACT_SPACE)]) )
     
     def differentiableMCQ(self,initial_state,dynamics,reward,N=35,max_depth=25,warmup=10):
         initial_node = MCNode(initial_state, reward)
