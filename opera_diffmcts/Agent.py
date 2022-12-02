@@ -6,27 +6,30 @@ import torch as th
 from MCNode import MCNode
 from numpy.random import default_rng
 rng = default_rng()
-
+import random
 
 ACT_SPACE = 4
 OBS_SPACE = 8
 BATCH_SIZE = 128
+MEM_LEN = 15000
+SAMPLE_SIZE = 100
 class Agent():
     def __init__(self,H):
-        self.episodeMemory = deque()
+        self.memory = deque(maxlen=MEM_LEN)
         self.last_state = None
         self.dnet = DynamicsNet()
         self.H = H
         self.last_act = None
 
     def step(self,obs,reward):
+        '''
         if len(self.episodeMemory) <= 3:
             act = random.randint(0,ACT_SPACE-1)
-        else: 
-            with th.no_grad(): 
-                self.dnet.eval()
-                qvals = self.differentiableMCQ(th.Tensor(obs),self.dnet)
-                act = np.argmax(qvals).item()
+        '''
+        with th.no_grad(): 
+            self.dnet.eval()
+            qvals = self.differentiableMCQ(th.Tensor(obs),self.dnet)
+            act = np.argmax(qvals).item()
                 #action_probs = th.nn.functional.softmax(th.nan_to_num(qvals),dim=0).numpy()
                 #print(action_probs)
                 #act = rng.choice(4,p=action_probs)
@@ -36,17 +39,19 @@ class Agent():
             self.last_act = act
         else:
             transition = (self.last_state,self.last_act,obs,reward,False)
-            self.episodeMemory[-1].append(transition)
+            self.curr_ep.append(transition)
             self.last_state = obs
             self.last_act = act
         return act
 
     def endEpisode(self,obs,reward):
         transition = (self.last_state,self.last_act,obs,reward,True)
-        self.episodeMemory[-1].append(transition)
-        if len(self.episodeMemory) < 3: return
+        self.curr_ep.append(transition)
+        #if len(self.episodeMemory) < 3: return
+        sample = random.sample(self.curr_ep,SAMPLE_SIZE if len(self.curr_ep) > SAMPLE_SIZE else len(self.curr_ep) )
+        for v in sample: self.memory.append(v)
 
-        last_ep = list(self.episodeMemory[-1]) + list(self.episodeMemory[-2]) + list(self.episodeMemory[-3])
+        last_ep = list(self.memory)
         X = np.zeros((len(last_ep),OBS_SPACE*ACT_SPACE))
         y = np.zeros((len(last_ep),OBS_SPACE+2))
 
@@ -62,7 +67,8 @@ class Agent():
         self.trainDynamicsNet(X,th.Tensor(y))
 
     def beginEpisode(self):
-        self.episodeMemory.append(deque())
+        self.curr_ep = deque()
+
 
     def trainDynamicsNet(self,X,y,epochs = 8000):
 
@@ -86,12 +92,13 @@ class Agent():
         #state, reward, terminal
         return pred[:OBS_SPACE], pred[-2], pred[-1] > 0.5
     
-    def differentiableMCQ(self,initial_state,dynamics,N=100,max_depth=35,warmup=25):
+    def differentiableMCQ(self,initial_state,dynamics,N=40,max_depth=30,warmup=10000):
         initial_node = MCNode(initial_state)
         for n in range(N):
             curr_node = initial_node
             curr_rollout = deque()
             curr_rollout.append((initial_node,-1))
+            #print("N:",n,initial_node.rewards)
 
             while True:
                 if n<warmup: action = th.randint(ACT_SPACE,(1,))
@@ -105,7 +112,9 @@ class Agent():
                 else:
                     predicted_state, r, t = self.predict_state(curr_node.S,action,dynamics)
                     curr_node = MCNode(predicted_state)
+                    curr_rollout[-1][0].branches[action] = curr_node
                     curr_rollout[-1][0].sa_rewards[action] = r
+                    #print("add node")
                 
                 curr_rollout.append((curr_node,action))
                 if len(curr_rollout) >= max_depth or t:
